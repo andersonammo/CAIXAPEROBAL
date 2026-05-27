@@ -406,8 +406,8 @@
                 <div class="mp-grid-pagos">
                     <div class="mp-grid-title"><i class="fas fa-print"></i> Opções de Impressão</div>
                     <div style="padding:10px 15px; font-size:12px; color: #475569; display:flex; flex-direction:column; gap:8px;">
-                        <label style="cursor:pointer; font-weight:600; color:var(--dark-sidebar); display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chk-imprimir-recibo" checked style="width:16px; height:16px; accent-color: var(--dark-sidebar);"> Imprimir Recibo PDV</label>
-                        <label style="cursor:pointer; font-weight:600; color:var(--blue-header); display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chk-imprimir-nfce" checked style="width:16px; height:16px; accent-color: var(--blue-header);"> Emitir Cupom Fiscal (NFC-e)</label>
+                        <label style="cursor:pointer; font-weight:600; color:var(--dark-sidebar); display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chk-imprimir-recibo" style="width:16px; height:16px; accent-color: var(--dark-sidebar);"> Imprimir Recibo PDV</label>
+                        <label style="cursor:pointer; font-weight:600; color:var(--blue-header); display:flex; align-items:center; gap:6px;"><input type="checkbox" id="chk-imprimir-nfce" style="width:16px; height:16px; accent-color: var(--blue-header);"> Emitir Cupom Fiscal (NFC-e)</label>
                     </div>
                 </div>
             </div>
@@ -481,9 +481,18 @@
 
     function tratarValor(val) {
         if (typeof val === 'number') return val;
-        if (!val) return 0;
-        let str = String(val).replace(/[^0-9\,\.\-]/g, '').trim();
-        if (str.includes(',')) { str = str.replace(/\./g, '').replace(',', '.'); }
+        if (val === null || val === undefined || val === '') return 0;
+
+        let str = String(val).trim().replace(/[^0-9,.-]/g, '');
+        if (!str) return 0;
+
+        // Formato brasileiro: 1.800,00 / 1800,00 / 15,00
+        if (str.includes(',')) {
+            str = str.replace(/\./g, '').replace(',', '.');
+            return parseFloat(str) || 0;
+        }
+
+        // Formato americano ou número simples: 1800.00 / 1800 / 15
         return parseFloat(str) || 0;
     }
 
@@ -1092,7 +1101,11 @@
         document.getElementById('v-desconto').value = ""; 
         document.getElementById('v-acrescimo').value = ""; 
         document.getElementById('v-cred-parcelas').value = "1"; 
-        document.getElementById('chk-pag-parcial').checked = false; 
+        document.getElementById('chk-pag-parcial').checked = false;
+        const chkReciboReset = document.getElementById('chk-imprimir-recibo');
+        const chkNfceReset = document.getElementById('chk-imprimir-nfce');
+        if (chkReciboReset) chkReciboReset.checked = false;
+        if (chkNfceReset) chkNfceReset.checked = false;
         fecharTelaPagamento(); 
         const btn = document.getElementById('btn-confirma-fim'); 
         btn.disabled = false; 
@@ -1127,7 +1140,15 @@
                     tr.innerHTML = `<td>${p.data||"-"}</td><td><b style="color:var(--dark-sidebar);">${p.cliente||"-"}</b></td><td>${p.vendedor||"-"}</td><td style="font-weight:600;">R$ ${totalF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td><td style="color:var(--danger); font-weight:700;">R$ ${saldoF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td>`;
                     tr.ondblclick = () => { 
                         const idBaixa = p.idVenda || p.idOriginal || p.id || p.numero || "DESCONHECIDO"; 
-                        carrinho = [{ nome: "PGTO SALDO PARCIAL - " + p.cliente, valor: saldoF, total: saldoF, qtd: 1, idOriginal: idBaixa }]; 
+                        carrinho = [{
+                            nome: "PGTO SALDO PARCIAL - " + p.cliente,
+                            valor: saldoF,
+                            total: saldoF,
+                            qtd: 1,
+                            idOriginal: idBaixa,
+                            tipoBaixa: "parcial",
+                            saldoAnterior: saldoF
+                        }]; 
                         document.getElementById('cliente-nome').value = p.cliente; 
                         document.getElementById('vendedor-select').value = p.vendedor; 
                         document.getElementById('tipo-venda').value = 'direta'; 
@@ -1156,13 +1177,20 @@
                 dados.forEach(p => {
                     const tr = document.createElement('tr'); 
                     tr.className = "linha-pendente"; 
-                    let totalF = tratarValor(p.total); 
-                    let rawStr = String(p.total); 
-                    if (!rawStr.includes(',') && !rawStr.includes('.') && totalF > 0) { totalF = totalF / 100; }
+                    // Corrigido: não divide mais valores inteiros por 100.
+                    // Antes, 1800 virava 18,00 e 1500 virava 15,00.
+                    let totalF = tratarValor(p.total);
                     tr.innerHTML = `<td><b style="color:var(--dark-sidebar);">${p.cliente||"-"}</b></td><td>${p.vendedor||"-"}</td><td style="color:var(--blue-header); font-weight:700;">R$ ${totalF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td>`;
                     tr.ondblclick = () => { 
                         const idBaixa = p.idVenda || p.idOriginal || p.id || p.numero || "DESCONHECIDO"; 
-                        carrinho = [{ nome: "PGTO PEDIDO - " + p.cliente, valor: totalF, total: totalF, qtd: 1, idOriginal: idBaixa }]; 
+                        carrinho = [{
+                            nome: "PGTO PEDIDO - " + p.cliente,
+                            valor: totalF,
+                            total: totalF,
+                            qtd: 1,
+                            idOriginal: idBaixa,
+                            tipoBaixa: "agrupado"
+                        }]; 
                         document.getElementById('cliente-nome').value = p.cliente; 
                         document.getElementById('vendedor-select').value = p.vendedor; 
                         document.getElementById('tipo-venda').value = 'direta'; 
@@ -1249,8 +1277,21 @@
         document.querySelectorAll('.in-pag').forEach(inp => inp.value = ""); 
         document.getElementById('v-desconto').value = ""; 
         document.getElementById('v-acrescimo').value = ""; 
-        document.getElementById('v-cred-parcelas').value = "1"; 
-        document.getElementById('chk-pag-parcial').checked = false; 
+        document.getElementById('v-cred-parcelas').value = "1";
+
+        const ehBaixaParcial = carrinho.length > 0 && (
+            carrinho[0].tipoBaixa === "parcial" ||
+            String(carrinho[0].nome || "").includes("PGTO SALDO")
+        );
+
+        // Em recebimento de saldo parcial, já deixa marcado para permitir novo pagamento parcial.
+        document.getElementById('chk-pag-parcial').checked = ehBaixaParcial;
+
+        // Mantém as opções de impressão/NFC-e desmarcadas por padrão.
+        const chkRecibo = document.getElementById('chk-imprimir-recibo');
+        const chkNfce = document.getElementById('chk-imprimir-nfce');
+        if (chkRecibo) chkRecibo.checked = false;
+        if (chkNfce) chkNfce.checked = false;
         
         document.getElementById('mp-lbl-cliente').innerText = document.getElementById('cliente-nome').value; 
         document.getElementById('lbl-mp-subtotal').innerText = getSubtotalCarrinho().toLocaleString('pt-br', {minimumFractionDigits: 2}); 
@@ -1288,122 +1329,161 @@
     }
 
     async function confirmarVendaFechada() {
-        const nomeClienteValidacao = document.getElementById('cliente-nome').value.trim(); 
-        if (nomeClienteValidacao === "" || nomeClienteValidacao.toUpperCase() === "VENDA AO CONSUMIDOR") { 
-            return alert("Erro: Cliente não informado. Feche esta tela e informe o cliente."); 
-        }
-        
-        const subtotal = getSubtotalCarrinho(); 
-        const desconto = parseFloat(document.getElementById('v-desconto').value) || 0; 
-        const acrescimo = parseFloat(document.getElementById('v-acrescimo').value) || 0; 
-        const totalVendaFinal = (subtotal - desconto) + acrescimo;
-        
-        let totalPago = 0; 
-        let metodosUsados = []; 
-        const camposPagamento = [ 
-            { id: 'v-deb-maestro', nome: 'Débito Maestro' }, { id: 'v-deb-master', nome: 'Débito Master' }, 
-            { id: 'v-deb-visa', nome: 'Débito Visa' }, { id: 'v-cred-master', nome: 'Crédito Master' }, 
-            { id: 'v-cred-visa', nome: 'Crédito Visa' }, { id: 'v-cred-outros', nome: 'Crédito Elo/Outros' }, 
-            { id: 'v-out-din', nome: 'Dinheiro' }, { id: 'v-out-pix', nome: 'PIX' }, 
-            { id: 'v-out-boleto', nome: 'Boleto' }, { id: 'v-out-bonuscred', nome: 'Bonuscred' }, 
-            { id: 'v-out-cred', nome: 'Crediário' } 
-        ];
-        
-        camposPagamento.forEach(campo => { 
-            const val = parseFloat(document.getElementById(campo.id).value) || 0; 
-            if(val > 0) { 
-                totalPago += val; 
-                metodosUsados.push(campo.nome); 
-            } 
-        });
-        
-        const isParcialPermitido = document.getElementById('chk-pag-parcial').checked; 
-        const emitirNF = document.getElementById('chk-imprimir-nfce').checked; 
-        const imprimirA4 = document.getElementById('chk-imprimir-recibo').checked;
-        
-        if (totalPago === 0 && !isParcialPermitido) { 
-            return alert("Insira o valor nos campos de pagamento para prosseguir."); 
-        } 
-        
-        let falta = totalVendaFinal - totalPago; 
-        
-        if (falta > 0.01 && !isParcialPermitido) { 
-            return alert(`Falta pagar R$ ${falta.toLocaleString('pt-br', {minimumFractionDigits: 2})}. Marque a opção 'Pagamento parcial' se quiser gerar a dívida.`); 
-        }
-        
-        const parcelasNum = document.getElementById('v-cred-parcelas').value; 
-        const stringPagamento = metodosUsados.join(" + ") || "Sinal / A Prazo"; 
-        
-        let idPedidoOriginal = "NOVO"; 
-        let tipoOrigem = "venda_direta"; 
-        
-        if (carrinho.length > 0 && carrinho[0].idOriginal) { 
-            idPedidoOriginal = carrinho[0].idOriginal; 
-            if (carrinho[0].nome.includes("PGTO PEDIDO")) { 
-                tipoOrigem = "baixa_agrupado"; 
-            } else if (carrinho[0].nome.includes("PGTO SALDO")) { 
-                tipoOrigem = "baixa_parcial"; 
-            } 
+        const nomeClienteValidacao = document.getElementById('cliente-nome').value.trim();
+        if (nomeClienteValidacao === "" || nomeClienteValidacao.toUpperCase() === "VENDA AO CONSUMIDOR") {
+            return alert("Erro: Cliente não informado. Feche esta tela e informe o cliente.");
         }
 
-        const payload = { 
-            tipo: "venda", 
-            origem: tipoOrigem, 
-            idOriginal: idPedidoOriginal, 
-            vendedor: document.getElementById('vendedor-select').value, 
-            nomeCliente: document.getElementById('cliente-nome').value, 
-            telefone: "Não Informado", 
-            cpf: document.getElementById('cliente-cpf').value, 
-            itens: carrinho, 
-            subtotal: subtotal, 
-            desconto: desconto, 
-            acrescimo: acrescimo, 
-            valorTotal: totalVendaFinal, 
-            valorPago: totalPago, 
-            saldoDevedor: (isParcialPermitido && falta > 0) ? falta : 0, 
-            formaPagamento: stringPagamento, 
-            condicao: (isParcialPermitido && falta > 0) ? "Parcial" : "A Vista", 
-            parcelas: parcelasNum + "x", 
-            idVenda: "AMMO-" + Date.now(), 
-            emitirNotaFiscal: emitirNF 
+        const subtotal = getSubtotalCarrinho();
+        const desconto = parseFloat(document.getElementById('v-desconto').value) || 0;
+        const acrescimo = parseFloat(document.getElementById('v-acrescimo').value) || 0;
+        const totalVendaFinal = (subtotal - desconto) + acrescimo;
+
+        let totalPago = 0;
+        let metodosUsados = [];
+        const camposPagamento = [
+            { id: 'v-deb-maestro', nome: 'Débito Maestro' }, { id: 'v-deb-master', nome: 'Débito Master' },
+            { id: 'v-deb-visa', nome: 'Débito Visa' }, { id: 'v-cred-master', nome: 'Crédito Master' },
+            { id: 'v-cred-visa', nome: 'Crédito Visa' }, { id: 'v-cred-outros', nome: 'Crédito Elo/Outros' },
+            { id: 'v-out-din', nome: 'Dinheiro' }, { id: 'v-out-pix', nome: 'PIX' },
+            { id: 'v-out-boleto', nome: 'Boleto' }, { id: 'v-out-bonuscred', nome: 'Bonuscred' },
+            { id: 'v-out-cred', nome: 'Crediário' }
+        ];
+
+        camposPagamento.forEach(campo => {
+            const val = parseFloat(document.getElementById(campo.id).value) || 0;
+            if (val > 0) {
+                totalPago += val;
+                metodosUsados.push(campo.nome);
+            }
+        });
+
+        const emitirNF = document.getElementById('chk-imprimir-nfce').checked;
+        const imprimirA4 = document.getElementById('chk-imprimir-recibo').checked;
+
+        let idPedidoOriginal = "NOVO";
+        let tipoOrigem = "venda_direta";
+
+        if (carrinho.length > 0 && carrinho[0].idOriginal) {
+            idPedidoOriginal = carrinho[0].idOriginal;
+            if (carrinho[0].tipoBaixa === "agrupado" || String(carrinho[0].nome || "").includes("PGTO PEDIDO")) {
+                tipoOrigem = "baixa_agrupado";
+            } else if (carrinho[0].tipoBaixa === "parcial" || String(carrinho[0].nome || "").includes("PGTO SALDO")) {
+                tipoOrigem = "baixa_parcial";
+            }
+        }
+
+        const isBaixaParcial = tipoOrigem === "baixa_parcial";
+        const isParcialPermitido = document.getElementById('chk-pag-parcial').checked || isBaixaParcial;
+
+        if (totalPago === 0) {
+            return alert("Insira o valor recebido hoje nos campos de pagamento para prosseguir.");
+        }
+
+        let falta = totalVendaFinal - totalPago;
+        let troco = 0;
+        if (falta < 0) {
+            troco = Math.abs(falta);
+            falta = 0;
+        }
+
+        if (falta > 0.01 && !isParcialPermitido) {
+            return alert(`Falta pagar R$ ${falta.toLocaleString('pt-br', {minimumFractionDigits: 2})}. Marque a opção 'Pagamento parcial' se quiser gerar a dívida.`);
+        }
+
+        const parcelasNum = document.getElementById('v-cred-parcelas').value;
+        const stringPagamento = metodosUsados.join(" + ") || "Sinal / A Prazo";
+
+        // REGRA CORRIGIDA PARA BAIXA PARCIAL:
+        // - saldoAnterior = saldo que estava pendente antes deste pagamento.
+        // - valorBaixaDia = dinheiro recebido hoje.
+        // - novoSaldoParcial = saldo que continuará pendente.
+        // - valorTotal/subtotal enviados ao caixa = apenas o pagamento do dia.
+        const saldoAnteriorParcial = isBaixaParcial ? totalVendaFinal : 0;
+        const valorBaixaDia = isBaixaParcial ? totalPago : totalVendaFinal;
+        const novoSaldoParcial = isBaixaParcial ? Math.max(saldoAnteriorParcial - totalPago, 0) : ((isParcialPermitido && falta > 0) ? falta : 0);
+
+        const itensParaServidor = isBaixaParcial ? [{
+            nome: "RECEBIMENTO PARCIAL - " + document.getElementById('cliente-nome').value,
+            valor: totalPago,
+            total: totalPago,
+            qtd: 1,
+            idOriginal: idPedidoOriginal,
+            saldoAnterior: saldoAnteriorParcial,
+            novoSaldo: novoSaldoParcial
+        }] : carrinho;
+
+        const payload = {
+            tipo: "venda",
+            origem: tipoOrigem,
+            idOriginal: idPedidoOriginal,
+            vendedor: document.getElementById('vendedor-select').value,
+            nomeCliente: document.getElementById('cliente-nome').value,
+            telefone: "Não Informado",
+            cpf: document.getElementById('cliente-cpf').value,
+            itens: itensParaServidor,
+
+            // Para baixa parcial, o caixa recebe somente o pagamento do dia.
+            subtotal: isBaixaParcial ? totalPago : subtotal,
+            desconto: isBaixaParcial ? 0 : desconto,
+            acrescimo: isBaixaParcial ? 0 : acrescimo,
+            valorTotal: isBaixaParcial ? totalPago : totalVendaFinal,
+            valorPago: totalPago,
+            saldoDevedor: novoSaldoParcial,
+
+            // Campos extras para o backend atualizar corretamente o pedido parcial.
+            saldoAnteriorParcial: saldoAnteriorParcial,
+            valorBaixaDia: totalPago,
+            novoSaldoParcial: novoSaldoParcial,
+            troco: troco,
+
+            formaPagamento: stringPagamento,
+            condicao: isBaixaParcial
+                ? (novoSaldoParcial > 0 ? "Baixa Parcial" : "Parcial Quitado")
+                : ((isParcialPermitido && falta > 0) ? "Parcial" : "A Vista"),
+            parcelas: parcelasNum + "x",
+            idVenda: "AMMO-" + Date.now(),
+            emitirNotaFiscal: emitirNF
         };
-        
-        const btn = document.getElementById('btn-confirma-fim'); 
-        btn.disabled = true; 
+
+        const btn = document.getElementById('btn-confirma-fim');
+        btn.disabled = true;
         btn.innerHTML = "<i class='fas fa-circle-notch fa-spin'></i> Finalizando...";
 
         try {
             payload.arquivoPdfBase64 = await gerarArquivoPdfBase64OS(payload);
             if (imprimirA4) { imprimirReciboA4(payload); }
 
-            const resposta = await enviarDadosServidor(payload); 
+            const resposta = await enviarDadosServidor(payload);
             const dadosResposta = await resposta.json();
-            
-            if(emitirNF) { 
-                if(dadosResposta.link_danfe) { 
+
+            if (emitirNF) {
+                if (dadosResposta.link_danfe) {
                     let linkFinal = dadosResposta.link_danfe;
                     if (!linkFinal.startsWith("http")) {
-                        if (linkFinal.match(/^[0-9]{44}/)) { linkFinal = "https://api.focusnfe.com.br/v2/nfce/" + linkFinal; } 
+                        if (linkFinal.match(/^[0-9]{44}/)) { linkFinal = "https://api.focusnfe.com.br/v2/nfce/" + linkFinal; }
                         else if (linkFinal.startsWith("/v2")) { linkFinal = "https://api.focusnfe.com.br" + linkFinal; }
                     }
+                    window.location.href = linkFinal;
+                } else if (dadosResposta.alerta_nfe) {
+                    alert("Venda salva, mas atenção: " + dadosResposta.alerta_nfe);
+                } else {
+                    alert(dadosResposta.mensagem || "A nota está sendo processada pela SEFAZ.");
+                }
+            } else {
+                if (isBaixaParcial) {
+                    alert(`Pagamento parcial registrado com sucesso!\nRecebido hoje: R$ ${totalPago.toLocaleString('pt-br', {minimumFractionDigits: 2})}\nNovo saldo: R$ ${novoSaldoParcial.toLocaleString('pt-br', {minimumFractionDigits: 2})}`);
+                } else {
+                    alert("Operação registrada no servidor com sucesso!");
+                }
+            }
 
-                    // Força abrir a aba da NFC-e (Isso é permitido, pois é a SEFAZ real)
-                    window.location.href = linkFinal; 
-                } else if (dadosResposta.alerta_nfe) { 
-                    alert("Venda salva, mas atenção: " + dadosResposta.alerta_nfe); 
-                } else { 
-                    alert(dadosResposta.mensagem || "A nota está sendo processada pela SEFAZ."); 
-                } 
-            } else { 
-                alert("Operação registrada no servidor com sucesso!"); 
-            } 
-            
             setTimeout(() => { resetarPDV(); }, 1500);
-        } catch (erro) { 
-            console.error(erro); 
-            alert("Erro na comunicação com o servidor. Verifique a internet."); 
-            btn.disabled = false; 
-            btn.innerHTML = "<i class='fas fa-check-circle' style='font-size: 20px; margin-bottom: 5px;'></i> Finalizar Venda"; 
+        } catch (erro) {
+            console.error(erro);
+            alert("Erro na comunicação com o servidor. Verifique a internet.");
+            btn.disabled = false;
+            btn.innerHTML = "<i class='fas fa-check-circle' style='font-size: 20px; margin-bottom: 5px;'></i> Finalizar Venda";
         }
     }
 
