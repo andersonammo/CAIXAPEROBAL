@@ -363,9 +363,25 @@
         
         <div class="dash-fechamento">
             <div class="box-fech"><span>Fundo Inicial</span><b id="fech-fundo">R$ 0,00</b></div>
-            <div class="box-fech text-green"><span>(+) Vendas (Dinheiro)</span><b id="fech-entradas">R$ 0,00</b></div>
+            <div class="box-fech text-green"><span>(+) Dinheiro em Gaveta</span><b id="fech-entradas">R$ 0,00</b></div>
             <div class="box-fech text-red"><span>(-) Sangrias e Despesas</span><b id="fech-saidas">R$ 0,00</b></div>
             <div class="box-fech bg-blue"><span>Saldo Esperado (Dinheiro)</span><b id="fech-esperado">R$ 0,00</b></div>
+        </div>
+
+        <div style="background:white; border:1px solid var(--border-color); border-radius:var(--radius-md); padding:15px; margin-bottom:20px; box-shadow:var(--shadow-sm);">
+            <h4 style="margin:0 0 12px; color:var(--dark-sidebar);"><i class="fas fa-receipt" style="color:var(--blue-header);"></i> Vendas realizadas no dia por forma de pagamento</h4>
+            <div class="dash-fechamento" style="grid-template-columns: repeat(6, 1fr); margin-bottom:15px;">
+                <div class="box-fech text-green"><span>Dinheiro</span><b id="fech-venda-dinheiro">R$ 0,00</b></div>
+                <div class="box-fech"><span>PIX</span><b id="fech-venda-pix">R$ 0,00</b></div>
+                <div class="box-fech"><span>Débito</span><b id="fech-venda-debito">R$ 0,00</b></div>
+                <div class="box-fech"><span>Crédito</span><b id="fech-venda-credito">R$ 0,00</b></div>
+                <div class="box-fech"><span>Boleto</span><b id="fech-venda-boleto">R$ 0,00</b></div>
+                <div class="box-fech bg-blue"><span>Total Vendas</span><b id="fech-venda-total">R$ 0,00</b></div>
+            </div>
+            <table style="width:100%; margin-top:10px;" id="tabela-vendas-fechamento">
+                <thead><tr><th>Hora</th><th>Cliente</th><th>Forma de Pgto</th><th>Valor recebido</th><th>Total Venda</th></tr></thead>
+                <tbody><tr><td colspan="5" style="text-align:center; color:#64748b;">Carregando vendas do dia...</td></tr></tbody>
+            </table>
         </div>
 
         <div class="gaveta-box">
@@ -473,9 +489,8 @@
     // =========================================================================
     // 1. DEFINA AQUI AS URLs DO SEU GOOGLE APPS SCRIPT (WEB APP)
     // =========================================================================
-    const URL_BASE_2_PRINCIPAL = "https://script.google.com/macros/s/AKfycbzdJmnXHPjJLFs_XtiGKLhwf2ZoDInfWlTjr5zN1Kae2qGKqIDqH8ZvoDQOXq09ODELWQ/exec";
+    const URL_BASE_2_PRINCIPAL = "https://script.google.com/macros/s/AKfycbyt7EnnYa60CW4T200XHZacfHqDPHQ8OFHexSwMf14jR-W_eqDh-NMhaY_bCxaze2RLpA/exec";
     const LOGO_EMPRESA_URL = "https://i.postimg.cc/nz9k8v8n/Untitled-design-%282%29.png";
-
     // --- VARIÁVEIS DA SENHA MASTER E CONTROLES ---
     // Defina as senhas e quem é o dono de cada senha.
     const SENHAS_MASTER = {
@@ -508,6 +523,7 @@
     // =========================================================================
     const CHAVE_LOGIN_PDV = "AMMO_PDV_LOGIN_ATIVO";
     const CHAVE_CAIXA_PDV = "AMMO_PDV_CAIXA_DIA";
+    const CHAVE_VENDAS_DIA_PDV = "AMMO_PDV_VENDAS_DIA_FECHAMENTO";
 
     function dataHojeISO() {
         const agora = new Date();
@@ -552,6 +568,47 @@
         } catch(e) { return null; }
     }
 
+    function obterVendasLocaisDia() {
+        try {
+            const pacote = JSON.parse(localStorage.getItem(CHAVE_VENDAS_DIA_PDV) || "null");
+            if (!pacote || pacote.data !== dataHojeISO() || !Array.isArray(pacote.vendas)) return [];
+            return pacote.vendas;
+        } catch(e) { return []; }
+    }
+
+    function salvarVendaLocalFechamento(payload, metodosDetalhados) {
+        const vendas = obterVendasLocaisDia();
+        const registro = {
+            idVenda: payload.idVenda,
+            data: dataHojeISO(),
+            hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            cliente: payload.nomeCliente || '-',
+            formaPagamento: payload.formaPagamento || '-',
+            valorTotalOriginal: tratarValor(payload.valorTotalOriginal || payload.valorTotal || 0),
+            valorPagoDia: tratarValor(payload.valorPagoDia || payload.valorPago || payload.valorTotal || 0),
+            valorBoleto: tratarValor(payload.valorBoleto || 0),
+            metodosDetalhados: (metodosDetalhados || []).map(m => ({
+                nome: m.nome,
+                valor: tratarValor(m.valor || 0),
+                categoria: identificarCategoriaMetodo(m.nome)
+            }))
+        };
+        vendas.push(registro);
+        localStorage.setItem(CHAVE_VENDAS_DIA_PDV, JSON.stringify({ data: dataHojeISO(), vendas }));
+    }
+
+    function identificarCategoriaMetodo(nome) {
+        const t = String(nome || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        if (t.includes('DINHEIRO')) return 'dinheiro';
+        if (t.includes('PIX')) return 'pix';
+        if (t.includes('DEBITO') || t.includes('CARTAO DE D') || t.includes('CARTAO D')) return 'debito';
+        if (t.includes('CREDITO') || t.includes('CARTAO DE C') || t.includes('CARTAO C')) return 'credito';
+        if (t.includes('BOLETO')) return 'boleto';
+        if (t.includes('BONUSCRED')) return 'bonuscred';
+        if (t.includes('CARTAO')) return 'credito';
+        return 'outros';
+    }
+
     function restaurarCaixaLocalSeExistir() {
         const caixa = obterCaixaLocalHoje();
         if (!caixa) return false;
@@ -564,6 +621,31 @@
 
     function sairSistema() {
         localStorage.removeItem(CHAVE_LOGIN_PDV);
+        localStorage.removeItem(CHAVE_CAIXA_PDV);
+        sessionStorage.clear();
+        location.reload();
+    }
+
+    function voltarTelaLoginAposFechamento() {
+        // Ao fechar o caixa, encerra completamente a sessão do operador.
+        // Isso impede que o sistema restaure login/caixa do localStorage e obriga novo login.
+        try {
+            localStorage.removeItem(CHAVE_LOGIN_PDV);
+            localStorage.removeItem(CHAVE_CAIXA_PDV);
+            sessionStorage.clear();
+        } catch(e) {
+            console.warn('Não foi possível limpar a sessão local.', e);
+        }
+
+        cxSessao = "";
+        cxFundoInicial = 0;
+        cxResumoAtual = null;
+        carrinho = [];
+        bloqueioQuebraIgnorado = false;
+        bloqueioTempoIgnorado = false;
+        adminAutorizador = "";
+
+        // Recarrega a página já sem sessão salva, voltando direto para a tela de login.
         location.reload();
     }
 
@@ -892,6 +974,171 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
         }
     }
 
+
+    // =========================================================================
+    // RESUMO DO FECHAMENTO POR FORMA DE PAGAMENTO
+    // Corrige a conferência: dinheiro, pix, cartão, boleto e vendas do dia.
+    // O caixa em dinheiro continua considerando somente dinheiro na gaveta.
+    // =========================================================================
+    function obterNumeroResumo(obj, chaves) {
+        if (!obj) return 0;
+        for (const chave of chaves) {
+            if (obj[chave] !== undefined && obj[chave] !== null && obj[chave] !== '') return tratarValor(obj[chave]);
+        }
+        return 0;
+    }
+
+    function obterListaVendasResumo() {
+        if (!cxResumoAtual) return [];
+        const possiveis = [
+            cxResumoAtual.vendasDia,
+            cxResumoAtual.vendasDetalhadas,
+            cxResumoAtual.listaVendas,
+            cxResumoAtual.vendas,
+            cxResumoAtual.registrosVendas
+        ];
+        for (const lista of possiveis) {
+            if (Array.isArray(lista) && lista.length > 0) return lista;
+        }
+        return [];
+    }
+
+    function categorizarFormaPagamento(texto) {
+        const t = String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        const cat = { dinheiro: false, pix: false, debito: false, credito: false, boleto: false, bonuscred: false };
+        if (t.includes('DINHEIRO')) cat.dinheiro = true;
+        if (t.includes('PIX')) cat.pix = true;
+        if (t.includes('BOLETO')) cat.boleto = true;
+        if (t.includes('BONUSCRED')) cat.bonuscred = true;
+        if (t.includes('DEBITO') || t.includes('CARTAO DE D') || t.includes('CARTAO D')) cat.debito = true;
+        if (t.includes('CREDITO') || t.includes('CARTAO DE C') || t.includes('CARTAO C')) cat.credito = true;
+        if (t.includes('CARTAO') && !cat.debito && !cat.credito) cat.credito = true;
+        return cat;
+    }
+
+    function somarVendaNoResumo(resumo, v) {
+        const detalhes = Array.isArray(v.metodosDetalhados) ? v.metodosDetalhados :
+                         (Array.isArray(v.formasPagamentoDetalhadas) ? v.formasPagamentoDetalhadas : []);
+
+        if (detalhes.length > 0) {
+            detalhes.forEach(m => {
+                const categoria = m.categoria || identificarCategoriaMetodo(m.nome || m.forma || m.metodo || '');
+                const valor = tratarValor(m.valor || m.valorRecebido || 0);
+                if (categoria === 'dinheiro') resumo.dinheiro += valor;
+                else if (categoria === 'pix') resumo.pix += valor;
+                else if (categoria === 'debito') resumo.debito += valor;
+                else if (categoria === 'credito') resumo.credito += valor;
+                else if (categoria === 'boleto') resumo.boleto += valor;
+                else if (categoria === 'bonuscred') resumo.bonuscred += valor;
+            });
+        } else {
+            const forma = v.formaPagamento || v.formaPgto || v.pagamento || v.metodo || v.desc || v.descricao || '';
+            const totalVenda = obterNumeroResumo(v, ['valorTotalOriginal','totalVenda','valorTotal','total','subtotal']);
+            const valorRecebido = obterNumeroResumo(v, ['valorPagoDia','valorPago','recebido','valorRecebido','valorTotal','total','valor']);
+            const valorBoleto = obterNumeroResumo(v, ['valorBoleto','boleto']);
+            const cat = categorizarFormaPagamento(forma);
+            let valorBase = valorRecebido || totalVenda || 0;
+            let partes = [cat.dinheiro, cat.pix, cat.debito, cat.credito, cat.boleto, cat.bonuscred].filter(Boolean).length || 1;
+
+            if (valorBoleto > 0) {
+                resumo.boleto += valorBoleto;
+                if (cat.boleto && partes > 1) partes -= 1;
+                valorBase = Math.max(0, valorBase - valorBoleto);
+            }
+
+            const rateado = partes > 0 ? (valorBase / partes) : valorBase;
+            if (cat.dinheiro) resumo.dinheiro += rateado;
+            if (cat.pix) resumo.pix += rateado;
+            if (cat.debito) resumo.debito += rateado;
+            if (cat.credito) resumo.credito += rateado;
+            if (cat.bonuscred) resumo.bonuscred += rateado;
+            if (cat.boleto && valorBoleto <= 0) resumo.boleto += rateado;
+            if (!cat.dinheiro && !cat.pix && !cat.debito && !cat.credito && !cat.boleto && !cat.bonuscred) resumo.dinheiro += valorBase;
+        }
+
+        const totalVendaLinha = obterNumeroResumo(v, ['valorTotalOriginal','totalVenda','valorTotal','total','subtotal']);
+        const valorRecebidoLinha = obterNumeroResumo(v, ['valorPagoDia','valorPago','recebido','valorRecebido','valorTotal','total','valor']);
+        resumo.linhas.push({
+            hora: v.hora || v.dataHora || v.data || '-',
+            cliente: v.cliente || v.nomeCliente || v.nome || '-',
+            forma: v.formaPagamento || v.formaPgto || v.pagamento || '-',
+            recebido: valorRecebidoLinha || 0,
+            total: totalVendaLinha || valorRecebidoLinha || 0
+        });
+    }
+
+    function calcularResumoPagamentosFechamento() {
+        const vendasServidor = obterListaVendasResumo();
+        const vendasLocais = obterVendasLocaisDia();
+        const vendas = vendasServidor.length > 0 ? vendasServidor : vendasLocais;
+        const resumo = {
+            dinheiro: 0,
+            pix: 0,
+            debito: 0,
+            credito: 0,
+            boleto: 0,
+            bonuscred: 0,
+            total: 0,
+            linhas: []
+        };
+
+        if (vendas.length > 0) {
+            vendas.forEach(v => somarVendaNoResumo(resumo, v));
+        } else {
+            // Fallback com os totais já prontos do backend.
+            // IMPORTANTE: não jogar "outros" automaticamente em PIX, porque isso fazia crédito aparecer como PIX.
+            resumo.dinheiro = obterNumeroResumo(cxResumoAtual, ['vendasDinheiro','dinheiro']);
+            resumo.pix = obterNumeroResumo(cxResumoAtual, ['vendasPix','pix','vendasPIX']);
+            resumo.debito = obterNumeroResumo(cxResumoAtual, ['vendasDebito','debito','cartaoDebito']);
+            resumo.credito = obterNumeroResumo(cxResumoAtual, ['vendasCredito','credito','cartaoCredito']);
+            resumo.boleto = obterNumeroResumo(cxResumoAtual, ['vendasBoleto','boleto']);
+            resumo.bonuscred = obterNumeroResumo(cxResumoAtual, ['vendasBonuscred','bonuscred']);
+
+            if (Array.isArray(cxResumoAtual.movimentacoes)) {
+                cxResumoAtual.movimentacoes.forEach(m => {
+                    const forma = m.formaPagamento || m.desc || m.descricao || m.tipo || '';
+                    const valor = obterNumeroResumo(m, ['valor','total','valorTotal']);
+                    if (String(m.tipo || '').toUpperCase().includes('ENTRADA') && valor > 0) {
+                        resumo.linhas.push({ hora: m.hora || '-', cliente: m.cliente || '-', forma: forma || '-', recebido: valor, total: valor });
+                    }
+                });
+            }
+        }
+
+        resumo.total = resumo.dinheiro + resumo.pix + resumo.debito + resumo.credito + resumo.boleto + resumo.bonuscred;
+        return resumo;
+    }
+
+    function atualizarTelaResumoFechamento() {
+        const r = calcularResumoPagamentosFechamento();
+        const setTxt = (id, valor) => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = formatarMoedaBR(valor);
+        };
+
+        setTxt('fech-venda-dinheiro', r.dinheiro);
+        setTxt('fech-venda-pix', r.pix);
+        setTxt('fech-venda-debito', r.debito);
+        setTxt('fech-venda-credito', r.credito);
+        setTxt('fech-venda-boleto', r.boleto);
+        setTxt('fech-venda-total', r.total);
+
+        const tbody = document.querySelector('#tabela-vendas-fechamento tbody');
+        if (tbody) {
+            tbody.innerHTML = '';
+            if (!r.linhas.length) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b;">Nenhuma venda localizada para esta sessão/dia.</td></tr>';
+            } else {
+                r.linhas.forEach(v => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `<td>${escaparHTML(v.hora)}</td><td>${escaparHTML(v.cliente)}</td><td>${escaparHTML(v.forma)}</td><td style="font-weight:700; color:var(--green-text);">${formatarMoedaBR(v.recebido)}</td><td style="font-weight:700;">${formatarMoedaBR(v.total)}</td>`;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+        return r;
+    }
+
     async function abrirModalFechamento() {
         document.getElementById("dropdown-caixa").classList.remove("show-dropdown");
 
@@ -923,13 +1170,16 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
                 return; 
             }
             
-            const saidas = (cxResumoAtual.despesas || 0) + (cxResumoAtual.sangrias || 0); 
-            const saldoEsperado = cxFundoInicial + (cxResumoAtual.vendasDinheiro || 0) - saidas;
+            const resumoPgto = atualizarTelaResumoFechamento();
+            cxResumoAtual.resumoPagamentosFechamento = resumoPgto;
+            const saidas = (tratarValor(cxResumoAtual.despesas || 0)) + (tratarValor(cxResumoAtual.sangrias || 0)); 
+            const dinheiroDia = tratarValor(resumoPgto.dinheiro || cxResumoAtual.vendasDinheiro || 0);
+            const saldoEsperado = cxFundoInicial + dinheiroDia - saidas;
             
-            document.getElementById('fech-fundo').innerText = `R$ ${cxFundoInicial.toLocaleString('pt-br', {minimumFractionDigits: 2})}`; 
-            document.getElementById('fech-entradas').innerText = `R$ ${(cxResumoAtual.vendasDinheiro || 0).toLocaleString('pt-br', {minimumFractionDigits: 2})}`; 
-            document.getElementById('fech-saidas').innerText = `R$ ${saidas.toLocaleString('pt-br', {minimumFractionDigits: 2})}`; 
-            document.getElementById('fech-esperado').innerText = `R$ ${saldoEsperado.toLocaleString('pt-br', {minimumFractionDigits: 2})}`;
+            document.getElementById('fech-fundo').innerText = formatarMoedaBR(cxFundoInicial); 
+            document.getElementById('fech-entradas').innerText = formatarMoedaBR(dinheiroDia); 
+            document.getElementById('fech-saidas').innerText = formatarMoedaBR(saidas); 
+            document.getElementById('fech-esperado').innerText = formatarMoedaBR(saldoEsperado);
             
             document.getElementById('fech-esperado').dataset.valor = saldoEsperado; 
             document.getElementById('fech-diferenca').innerText = "Informe o valor em gaveta acima"; 
@@ -977,13 +1227,23 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
         btn.innerHTML = "<i class='fas fa-spinner fa-spin'></i> Finalizando Turno..."; 
         btn.disabled = true;
 
+        const resumoPgto = cxResumoAtual?.resumoPagamentosFechamento || atualizarTelaResumoFechamento();
         const payload = {
             tipo: 'fechar_caixa', 
             idSessao: cxSessao,
+            resumoPagamentos: resumoPgto,
+            vendasDoDia: resumoPgto.linhas || [],
             detalhes: { 
-                dinheiro: informado, 
-                pix: cxResumoAtual.vendasOutros || 0, 
-                debito: 0, credito: 0, boleto: 0, bonuscred: 0, 
+                dinheiro: informado,
+                dinheiroVendas: resumoPgto.dinheiro || 0,
+                pix: resumoPgto.pix || 0,
+                debito: resumoPgto.debito || 0,
+                credito: resumoPgto.credito || 0,
+                cartao: (resumoPgto.debito || 0) + (resumoPgto.credito || 0),
+                boleto: resumoPgto.boleto || 0,
+                bonuscred: resumoPgto.bonuscred || 0,
+                totalVendasDia: resumoPgto.total || 0,
+                vendasDoDia: resumoPgto.linhas || [],
                 quebra: quebra, 
                 gerente: operador, 
                 autorizador: adminAutorizador || "Não exigido" 
@@ -1002,10 +1262,8 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
             }
             
             setTimeout(() => {
-                alert("Turno encerrado. O sistema será reiniciado e começará um novo ciclo zerado.");
-                cxSessao = ""; 
-                carrinho = []; 
-                location.reload(); 
+                alert("Turno encerrado com sucesso. Voltando para a tela de login.");
+                voltarTelaLoginAposFechamento();
             }, 4000);
             
         } catch(e) { 
@@ -1053,7 +1311,12 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
 
     function imprimirRelatorioFechamentoSeguro(informado, esperado, quebra, operador, adminAuth) {
         const dataAtual = new Date().toLocaleString('pt-BR');
-        const saidas = (cxResumoAtual.despesas || 0) + (cxResumoAtual.sangrias || 0);
+        const saidas = (tratarValor(cxResumoAtual.despesas || 0)) + (tratarValor(cxResumoAtual.sangrias || 0));
+        const resumoPgto = cxResumoAtual?.resumoPagamentosFechamento || calcularResumoPagamentosFechamento();
+        let vendasHtml = "";
+        (resumoPgto.linhas || []).forEach(v => {
+            vendasHtml += `<tr><td style="font-size:9px; border-bottom:1px dotted #ccc; padding:2px 0;">${escaparHTML(v.hora)}</td><td style="font-size:9px; border-bottom:1px dotted #ccc; padding:2px 0;">${escaparHTML(String(v.cliente).substring(0,14))}</td><td style="font-size:9px; border-bottom:1px dotted #ccc; padding:2px 0;">${escaparHTML(String(v.forma).substring(0,16))}</td><td style="font-size:9px; text-align:right; border-bottom:1px dotted #ccc; padding:2px 0;">${formatarMoedaBR(v.recebido)}</td></tr>`;
+        });
         let movHtml = "";
         
         cxResumoAtual.movimentacoes.forEach(m => { 
@@ -1078,14 +1341,24 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
                 </div>
                 <div style="margin: 15px 0; border: 1px dashed #000; padding: 8px;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Fundo Inicial:</span> <span>R$ ${cxFundoInicial.toFixed(2)}</span></div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Vendas Dinheiro:</span> <span>(+) R$ ${(cxResumoAtual.vendasDinheiro || 0).toFixed(2)}</span></div>
-                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Sangrias/Despesas:</span> <span>(-) R$ ${saidas.toFixed(2)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Vendas Dinheiro:</span> <span>(+) ${formatarMoedaBR(resumoPgto.dinheiro)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Vendas PIX:</span> <span>${formatarMoedaBR(resumoPgto.pix)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Cartão Débito:</span> <span>${formatarMoedaBR(resumoPgto.debito)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Cartão Crédito:</span> <span>${formatarMoedaBR(resumoPgto.credito)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Boleto:</span> <span>${formatarMoedaBR(resumoPgto.boleto)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-weight:bold;"><span>Total Vendas Dia:</span> <span>${formatarMoedaBR(resumoPgto.total)}</span></div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Sangrias/Despesas:</span> <span>(-) ${formatarMoedaBR(saidas)}</span></div>
                     <hr style="border:0; border-top:1px solid #000; margin:5px 0;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-weight:bold;"><span>Saldo Esperado:</span> <span>R$ ${esperado.toFixed(2)}</span></div>
                     <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-weight:bold;"><span>Valor Informado:</span> <span>R$ ${informado.toFixed(2)}</span></div>
                     <div style="display:flex; justify-content:space-between; margin-bottom:4px;"><span>Diferença:</span> <span>R$ ${quebra.toFixed(2)}</span></div>
                     ${linhaAutorizacao}
                 </div>
+                <p style="text-align:center; font-weight:bold; margin-top:15px; border-bottom:1px dashed #000;">VENDAS DO DIA</p>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+                    <thead><tr><th style="text-align:left; border-bottom:1px solid #000; padding-bottom:3px; font-size:9px;">Hora</th><th style="text-align:left; border-bottom:1px solid #000; padding-bottom:3px; font-size:9px;">Cliente</th><th style="text-align:left; border-bottom:1px solid #000; padding-bottom:3px; font-size:9px;">Pgto</th><th style="text-align:right; border-bottom:1px solid #000; padding-bottom:3px; font-size:9px;">Valor</th></tr></thead>
+                    <tbody>${vendasHtml || '<tr><td colspan="4" style="text-align:center; font-size:9px; padding:5px 0;">Nenhuma venda listada</td></tr>'}</tbody>
+                </table>
                 <p style="text-align:center; font-weight:bold; margin-top:15px; border-bottom:1px dashed #000;">EXTRATO DE MOVIMENTAÇÃO</p>
                 <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
                     <thead><tr><th style="text-align:left; border-bottom: 1px solid #000; padding-bottom:3px;">Hora</th><th style="text-align:left; border-bottom: 1px solid #000; padding-bottom:3px;">Tipo</th><th style="text-align:left; border-bottom: 1px solid #000; padding-bottom:3px;">Desc.</th><th style="text-align:right; border-bottom: 1px solid #000; padding-bottom:3px;">Valor</th></tr></thead>
@@ -1782,9 +2055,10 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
                 dados.forEach(p => {
                     const tr = document.createElement('tr'); 
                     tr.className = "linha-pendente"; 
-                    let totalF = tratarValor(p.total); 
-                    let rawStr = String(p.total); 
-                    if (!rawStr.includes(',') && !rawStr.includes('.') && totalF > 0) { totalF = totalF / 100; }
+                    // CORREÇÃO: não dividir por 100.
+                    // O Google Sheets pode devolver 450 como número inteiro, e a divisão transformava em 4,50.
+                    // A função tratarValor já converte corretamente: 450, "450", "450,00" e "R$ 450,00".
+                    let totalF = tratarValor(p.total);
                     tr.innerHTML = `<td><b style="color:var(--dark-sidebar);">${p.cliente||"-"}</b></td><td>${p.vendedor||"-"}</td><td style="color:var(--blue-header); font-weight:700;">R$ ${totalF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td>`;
                     tr.ondblclick = () => { 
                         const idBaixa = p.idVenda || p.idOriginal || p.id || p.numero || "DESCONHECIDO"; 
@@ -2048,6 +2322,12 @@ Valor informado em boleto: ${formatarMoedaBR(valorBoleto)}`);
             boletoMotivoLiberacao: vendaComBoleto && liberacaoBoletoEntrada ? motivoLiberacaoBoleto : ''
         };
 
+        payload.formasPagamentoDetalhadas = metodosDetalhados.map(m => ({
+            nome: m.nome,
+            valor: tratarValor(m.valor || 0),
+            categoria: identificarCategoriaMetodo(m.nome)
+        }));
+
         const boletosGerados = valorBoleto > 0 ? gerarBoletosVenda(payload, valorBoleto, parcelasBoleto, diaVencimentoBoleto) : [];
         if (valorBoleto > 0 && boletosGerados.length === 0) return;
         payload.boletosGerados = boletosGerados;
@@ -2090,6 +2370,7 @@ Valor informado em boleto: ${formatarMoedaBR(valorBoleto)}`);
                 alert("Operação registrada no servidor com sucesso!"); 
             } 
             
+            salvarVendaLocalFechamento(payload, metodosDetalhados);
             liberacaoBoletoEntrada = false;
             motivoLiberacaoBoleto = '';
             setTimeout(() => { resetarPDV(); }, 1500);
@@ -2374,7 +2655,7 @@ if (!arquivoTexto.startsWith("data:application/pdf")) {
         }
     });
 
-    setInterval(() => { if (cxSessao) verificarBoletosVencidos(false); }, 5 * 60 * 1000);
+          setInterval(() => { if (cxSessao) verificarBoletosVencidos(false); }, 5 * 60 * 1000);
 </script>
 </body>
 </html>
