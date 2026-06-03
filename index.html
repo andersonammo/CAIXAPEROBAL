@@ -1847,6 +1847,8 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
         document.getElementById('v-desconto').value = ""; 
         document.getElementById('v-acrescimo').value = ""; 
         document.getElementById('v-cred-parcelas').value = "1"; 
+        if (document.getElementById('v-boleto-dia-vencimento')) document.getElementById('v-boleto-dia-vencimento').value = "";
+        if (document.getElementById('v-boleto-parcelas')) document.getElementById('v-boleto-parcelas').value = "6";
         document.getElementById('chk-pag-parcial').checked = false; 
         fecharTelaPagamento(); 
         const btn = document.getElementById('btn-confirma-fim'); 
@@ -2020,14 +2022,17 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
                     tr.className = "linha-pendente"; 
                     const totalF = tratarValor(p.total); 
                     const saldoF = tratarValor(p.saldo);
-                    const statusP = String(p.status || 'Pendente');
-                    const isBoleto = statusP.toUpperCase().includes('BOLETO') || String(p.cliente || '').toUpperCase().includes('BOLETO');
+                    const statusOriginal = String(p.status || 'Pendente');
+                    const clienteLimpo = String(p.cliente || '-').replace(/^\s*BOLETO\s*-\s*/i, '').trim() || '-';
+                    const possuiDadosReaisDeBoleto = tratarValor(p.valorBoleto || p.boleto || 0) > 0 || !!(p.idBoleto || p.ID_BOLETO || p.temBoletos || p.boletosGerados);
+                    const isBoleto = statusOriginal.toUpperCase().includes('BOLETO') && possuiDadosReaisDeBoleto;
+                    const statusP = isBoleto ? 'BOLETO - PENDENTE' : 'PARCIAL PENDENTE';
                     tr.style.background = isBoleto ? '#fee2e2' : '#dbeafe';
-                    tr.innerHTML = `<td>${p.data||"-"}</td><td><b style="color:var(--dark-sidebar);">${p.cliente||"-"}</b></td><td>${p.vendedor||"-"}</td><td style="font-weight:600;">R$ ${totalF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td><td style="color:var(--danger); font-weight:700;">R$ ${saldoF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td><td><span class="badge" style="background:${isBoleto ? '#fecaca' : '#bfdbfe'}; color:${isBoleto ? '#991b1b' : '#1e3a8a'};">${statusP}</span></td>`;
+                    tr.innerHTML = `<td>${p.data||"-"}</td><td><b style="color:var(--dark-sidebar);">${clienteLimpo}</b></td><td>${p.vendedor||"-"}</td><td style="font-weight:600;">R$ ${totalF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td><td style="color:var(--danger); font-weight:700;">R$ ${saldoF.toLocaleString('pt-br', {minimumFractionDigits: 2})}</td><td><span class="badge" style="background:${isBoleto ? '#fecaca' : '#bfdbfe'}; color:${isBoleto ? '#991b1b' : '#1e3a8a'};">${statusP}</span></td>`;
                     tr.ondblclick = () => { 
                         const idBaixa = p.idVenda || p.idOriginal || p.id || p.numero || "DESCONHECIDO"; 
-                        carrinho = [{ nome: "PGTO SALDO PARCIAL - " + p.cliente, valor: saldoF, total: saldoF, qtd: 1, idOriginal: idBaixa }]; 
-                        document.getElementById('cliente-nome').value = p.cliente; 
+                        carrinho = [{ nome: "PGTO SALDO PARCIAL - " + clienteLimpo, valor: saldoF, total: saldoF, qtd: 1, idOriginal: idBaixa }]; 
+                        document.getElementById('cliente-nome').value = clienteLimpo; 
                         document.getElementById('vendedor-select').value = p.vendedor; 
                         document.getElementById('tipo-venda').value = 'direta'; 
                         renderTable(); 
@@ -2150,6 +2155,8 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
         document.getElementById('v-desconto').value = ""; 
         document.getElementById('v-acrescimo').value = ""; 
         document.getElementById('v-cred-parcelas').value = "1"; 
+        if (document.getElementById('v-boleto-dia-vencimento')) document.getElementById('v-boleto-dia-vencimento').value = "";
+        if (document.getElementById('v-boleto-parcelas')) document.getElementById('v-boleto-parcelas').value = "6";
         document.getElementById('chk-pag-parcial').checked = false; 
         
         document.getElementById('mp-lbl-cliente').innerText = document.getElementById('cliente-nome').value; 
@@ -2220,12 +2227,26 @@ Por segurança, a abertura só pode ser feita 1 vez por dia. A sessão foi resta
             } 
         });
 
-        const valorBoleto = parseFloat(document.getElementById('v-out-boleto').value) || 0;
+        // CORREÇÃO AMMO: boleto só pode virar boleto quando o campo BOLETO estiver realmente sendo usado.
+        // Se algum valor antigo ficou preso no campo de boleto, mas os outros pagamentos já cobrem a venda,
+        // o sistema ignora/zera o boleto para não gravar cartão, pix ou dinheiro como BOLETO - PENDENTE.
+        const campoBoleto = document.getElementById('v-out-boleto');
+        let valorBoleto = parseFloat(campoBoleto?.value) || 0;
         const parcelasBoleto = Math.min(Math.max(parseInt(document.getElementById('v-boleto-parcelas').value) || 1, 1), 6);
         const diaVencimentoBoleto = parseInt(document.getElementById('v-boleto-dia-vencimento')?.value || 0);
-        const valorPagoDia = Math.max(0, totalPago - valorBoleto);
+        const totalPagoSemBoleto = Math.max(0, totalPago - valorBoleto);
+
+        if (valorBoleto > 0 && totalPagoSemBoleto + 0.01 >= totalVendaFinal) {
+            valorBoleto = 0;
+            if (campoBoleto) campoBoleto.value = '';
+            totalPago = totalPagoSemBoleto;
+            metodosUsados = metodosUsados.filter(m => m !== 'Boleto');
+            metodosDetalhados = metodosDetalhados.filter(m => m.nome !== 'Boleto');
+        }
+
         const vendaComBoleto = valorBoleto > 0;
-        if (valorBoleto > 0) {
+        const valorPagoDia = vendaComBoleto ? Math.max(0, totalPago - valorBoleto) : totalPago;
+        if (vendaComBoleto) {
             if (![1, 7, 15].includes(diaVencimentoBoleto)) {
                 return alert('Antes de gerar o carnê, escolha a data de vencimento do boleto: dia 1, dia 7 ou dia 15.');
             }
@@ -2308,7 +2329,7 @@ Valor informado em boleto: ${formatarMoedaBR(valorBoleto)}`);
             saldoDevedor: ((isParcialPermitido || vendaComBoleto) && falta > 0) ? falta : 0, 
             formaPagamento: stringPagamento, 
             condicao: vendaComBoleto ? "Boleto / Parcial" : ((isParcialPermitido && falta > 0) ? "Parcial" : "A Vista"), 
-            parcelas: valorBoleto > 0 ? (parcelasBoleto + "x boleto") : (parcelasNum + "x"), 
+            parcelas: vendaComBoleto ? (parcelasBoleto + "x boleto") : (parcelasNum + "x"), 
             parcelasBoleto: parcelasBoleto,
             valorBoleto: valorBoleto,
             diaVencimentoBoleto: vendaComBoleto ? diaVencimentoBoleto : '',
@@ -2328,8 +2349,8 @@ Valor informado em boleto: ${formatarMoedaBR(valorBoleto)}`);
             categoria: identificarCategoriaMetodo(m.nome)
         }));
 
-        const boletosGerados = valorBoleto > 0 ? gerarBoletosVenda(payload, valorBoleto, parcelasBoleto, diaVencimentoBoleto) : [];
-        if (valorBoleto > 0 && boletosGerados.length === 0) return;
+        const boletosGerados = vendaComBoleto ? gerarBoletosVenda(payload, valorBoleto, parcelasBoleto, diaVencimentoBoleto) : [];
+        if (vendaComBoleto && boletosGerados.length === 0) return;
         payload.boletosGerados = boletosGerados;
         payload.temBoletos = boletosGerados.length > 0;
         
@@ -2343,7 +2364,7 @@ Valor informado em boleto: ${formatarMoedaBR(valorBoleto)}`);
 
             // Comprovante de pagamento e carnê do boleto
             imprimirComprovantePagamento(payload, metodosDetalhados);
-            if (valorBoleto > 0) {
+            if (vendaComBoleto) {
                 setTimeout(() => imprimirCarneBoleto(payload, valorBoleto, parcelasBoleto, boletosGerados), 700);
             }
 
